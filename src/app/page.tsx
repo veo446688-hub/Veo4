@@ -72,10 +72,11 @@ export default function ImageToVideoPage() {
       return
     }
 
-    // Validate file size (max 50MB)
-    const maxSize = 50 * 1024 * 1024
+    // Validate file size (max 4 MB for Vercel)
+    const maxSize = 4 * 1024 * 1024
     if (file.size > maxSize) {
-      alert('File size must be less than 50MB')
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2)
+      alert(`File is too large (${sizeMB} MB). Please upload an image smaller than 4 MB.`)
       return
     }
 
@@ -102,8 +103,18 @@ export default function ImageToVideoPage() {
       return
     }
 
+    // Check file size (Vercel has a 4.5 MB request limit)
+    const MAX_FILE_SIZE = 4 * 1024 * 1024 // 4 MB to be safe
+    if (imageFile.size > MAX_FILE_SIZE) {
+      const sizeMB = (imageFile.size / (1024 * 1024)).toFixed(2)
+      alert(`File is too large (${sizeMB} MB). Please upload an image smaller than 4 MB.`)
+      return
+    }
+
     console.log('Starting video generation:', {
       imageFile: imageFile.name,
+      fileSize: (imageFile.size / 1024 / 1024).toFixed(2) + ' MB',
+      imageType: imageFile.type,
       prompt: prompt,
       duration: duration[0],
       fps: fps[0],
@@ -137,12 +148,37 @@ export default function ImageToVideoPage() {
       console.log('Response status:', uploadResponse.status)
 
       if (!uploadResponse.ok) {
-        const error = await uploadResponse.json()
-        console.error('Upload failed:', error)
-        throw new Error(error.message || 'Failed to upload image')
+        // Try to get error details, handle non-JSON responses
+        let errorMessage = 'Failed to upload image'
+        try {
+          const contentType = uploadResponse.headers.get('content-type')
+          if (contentType && contentType.includes('application/json')) {
+            const error = await uploadResponse.json()
+            errorMessage = error.message || error.error || errorMessage
+          } else {
+            const errorText = await uploadResponse.text()
+            errorMessage = errorText || errorMessage
+          }
+        } catch (e) {
+          const errorText = await uploadResponse.text()
+          errorMessage = errorText || errorMessage
+        }
+        console.error('Upload failed:', errorMessage)
+        throw new Error(errorMessage)
       }
 
-      const { jobId } = await uploadResponse.json()
+      let jobId: string
+      try {
+        const response = await uploadResponse.json()
+        jobId = response.jobId || response.id
+        if (!jobId) {
+          throw new Error('No job ID returned from server')
+        }
+      } catch (e) {
+        console.error('Failed to parse response:', e)
+        const errorText = await uploadResponse.text()
+        throw new Error(`Invalid response from server: ${errorText}`)
+      }
       console.log('Job created:', jobId)
 
       setJob({
@@ -176,10 +212,25 @@ export default function ImageToVideoPage() {
         console.log('Status check response:', response.status)
 
         if (!response.ok) {
-          throw new Error('Failed to check job status')
+          clearInterval(pollInterval)
+          let errorMessage = 'Failed to check job status'
+          try {
+            const errorText = await response.text()
+            errorMessage = errorText || errorMessage
+          } catch (e) {
+            // Ignore text parsing errors
+          }
+          throw new Error(errorMessage)
         }
 
-        const data = await response.json()
+        let data: any
+        try {
+          data = await response.json()
+        } catch (e) {
+          console.error('Failed to parse status response:', e)
+          clearInterval(pollInterval)
+          throw new Error('Invalid response from server')
+        }
         console.log('Job status data:', data)
 
         if (data.status === 'processing') {
@@ -207,12 +258,11 @@ export default function ImageToVideoPage() {
           } : null)
         }
       } catch (error) {
-        console.error('Polling error:', error)
         clearInterval(pollInterval)
         setJob(prev => prev ? {
           ...prev,
           status: 'failed',
-          error: 'Failed to check job status'
+          error: error instanceof Error ? error.message : 'Failed to check job status'
         } : null)
       }
     }, 3000)
@@ -302,7 +352,7 @@ export default function ImageToVideoPage() {
                   Upload Image
                 </CardTitle>
                 <CardDescription>
-                  Supports JPG, PNG, WebP, BMP, TIFF, GIF (Max 50MB)
+                  Supports JPG, PNG, WebP, BMP, TIFF, GIF (Max 4MB)
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">

@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 
 // Supported image types
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/tiff', 'image/gif']
-const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+const MAX_FILE_SIZE = 4 * 1024 * 1024 // 4MB (Vercel limit)
 
 export async function POST(request: NextRequest) {
   console.log('API: /api/video/create called')
@@ -87,8 +87,8 @@ export async function POST(request: NextRequest) {
     // Validate file size
     if (image.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { success: false, message: `File size exceeds maximum limit of ${MAX_FILE_SIZE / (1024 * 1024)}MB` },
-        { status: 400 }
+        { success: false, message: `File size exceeds maximum limit of ${MAX_FILE_SIZE / (1024 * 1024)}MB. Please upload a smaller image.` },
+        { status: 413 }
       )
     }
 
