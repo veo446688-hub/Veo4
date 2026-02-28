@@ -6,6 +6,42 @@ import ZAI from 'z-ai-web-dev-sdk'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+// Function to get MIME type from URL
+function getMimeTypeFromUrl(url: string): string {
+  const ext = url.split('.').pop()?.toLowerCase()
+  const mimeTypes: { [key: string]: string } = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'bmp': 'image/bmp',
+    'tiff': 'image/tiff',
+    'tif': 'image/tiff'
+  }
+  return mimeTypes[ext || ''] || 'image/jpeg'
+}
+
+// Function to convert URL to base64 (for image-to-video)
+async function imageUrlToBase64(imageUrl: string): Promise<string> {
+  try {
+    const response = await fetch(imageUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.statusText}`)
+    }
+
+    const blob = await response.blob()
+    const arrayBuffer = await blob.arrayBuffer()
+    const base64 = Buffer.from(arrayBuffer).toString('base64')
+    const mimeType = getMimeTypeFromUrl(imageUrl)
+
+    return `data:${mimeType};base64,${base64}`
+  } catch (error) {
+    console.error('Error converting image URL to base64:', error)
+    throw error
+  }
+}
+
 // Function to poll task status until completion
 async function pollTaskUntilComplete(zai: any, taskId: string, maxPolls: number = 60): Promise<any> {
   let pollCount = 0
@@ -102,16 +138,43 @@ export async function GET(request: NextRequest) {
           data: { status: 'processing', progress: 30 }
         })
 
+        // Convert image URL to base64 for AI processing
+        let base64Image: string | undefined
+
+        if (job.imageUrl) {
+          console.log(`Cron: Fetching image from ${job.imageUrl}`)
+          try {
+            base64Image = await imageUrlToBase64(job.imageUrl)
+            console.log(`Cron: Image converted to base64 (${base64Image.length} chars)`)
+          } catch (imageError) {
+            console.error(`Cron: Failed to fetch/convert image:`, imageError)
+            // Fall back to text-to-video if image fetch fails
+            console.log(`Cron: Falling back to text-to-video generation`)
+          }
+        }
+
         // Create video generation task
-        // Note: For image-to-video, we would need to fetch the image from cloud storage
-        // For now, this handles text-to-video generation
-        const task = await zai.video.generations.create({
+        const taskParams: any = {
           prompt: job.prompt,
           quality: job.quality as any,
           duration: job.duration as any,
           fps: job.fps as any,
           size: job.resolution as any
+        }
+
+        // Add image if we successfully converted it
+        if (base64Image) {
+          taskParams.image_url = base64Image
+        }
+
+        console.log(`Cron: Creating video task with params:`, {
+          hasImage: !!base64Image,
+          prompt: job.prompt.substring(0, 50),
+          quality: job.quality,
+          duration: job.duration
         })
+
+        const task = await zai.video.generations.create(taskParams)
 
         console.log(`Cron: Created video task ${task.id}`)
 

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
-import { existsSync } from 'fs'
-import path from 'path'
+import { put } from '@vercel/blob'
 import { db } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 
@@ -13,6 +11,16 @@ export async function POST(request: NextRequest) {
   console.log('API: /api/video/create called')
 
   try {
+    // Check if Vercel Blob is configured
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN
+    if (!blobToken) {
+      console.error('API: BLOB_READ_WRITE_TOKEN not configured')
+      return NextResponse.json(
+        { success: false, message: 'Storage not configured. Please set up Vercel Blob.' },
+        { status: 500 }
+      )
+    }
+
     // Rate limiting based on IP address
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0] ||
                request.headers.get('x-real-ip') ||
@@ -106,23 +114,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create upload directory if it doesn't exist
-    const uploadDir = path.join(process.cwd(), 'uploads', 'images')
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true })
-    }
+    // Upload image to Vercel Blob
+    console.log('API: Uploading image to Vercel Blob')
 
-    // Generate unique filename
     const timestamp = Date.now()
     const randomStr = Math.random().toString(36).substring(2, 15)
-    const ext = path.extname(image.name) || '.jpg'
-    const filename = `img_${timestamp}_${randomStr}${ext}`
-    const filepath = path.join(uploadDir, filename)
+    const ext = image.name.split('.').pop() || 'jpg'
+    const filename = `images/${timestamp}_${randomStr}.${ext}`
 
-    // Save image file
-    const bytes = await image.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    await writeFile(filepath, buffer)
+    try {
+      const blob = await put(filename, image, {
+        access: 'public',
+      })
+
+      console.log('API: Image uploaded to Blob:', blob.url)
+    } catch (blobError) {
+      console.error('API: Failed to upload to Blob:', blobError)
+      return NextResponse.json(
+        { success: false, message: 'Failed to upload image to storage' },
+        { status: 500 }
+      )
+    }
+
+    const imageUrl = `https://${process.env.BLOB_STORE_ID || 'your-blob-store'}.public.blob.vercel-storage.com/${filename}`
 
     // Create job record in database
     console.log('API: Creating job in database')
@@ -135,27 +149,14 @@ export async function POST(request: NextRequest) {
         fps,
         quality,
         resolution,
-        imageUrl: `/uploads/images/${filename}`,
+        imageUrl: imageUrl,
       }
     })
     console.log('API: Job created:', job.id)
 
-    // Notify the background processing service (via a simple trigger file)
-    const triggerDir = path.join(process.cwd(), 'queue', 'triggers')
-    if (!existsSync(triggerDir)) {
-      await mkdir(triggerDir, { recursive: true })
-    }
-    const triggerFile = path.join(triggerDir, `${job.id}.trigger`)
-    await writeFile(triggerFile, JSON.stringify({
-      jobId: job.id,
-      imageFile: filename,
-      prompt: prompt.trim(),
-      duration,
-      fps,
-      quality,
-      resolution
-    }))
-    console.log('API: Trigger file created:', triggerFile)
+    // Note: For Vercel deployment, we don't create trigger files
+    // Instead, the cron job will pick up queued jobs from the database
+    console.log('API: Job queued for processing by cron')
 
     return NextResponse.json({
       success: true,
@@ -166,7 +167,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating video job:', error)
     return NextResponse.json(
-      { success: false, message: 'Internal server error' },
+      {
+        success: false,
+        message: error instanceof Error ? error.message : 'Internal server error'
+      },
       { status: 500 }
     )
   }
