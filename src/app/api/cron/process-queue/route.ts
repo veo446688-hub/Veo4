@@ -25,7 +25,10 @@ function getMimeTypeFromUrl(url: string): string {
 // Function to convert URL to base64 (for image-to-video)
 async function imageUrlToBase64(imageUrl: string): Promise<string> {
   try {
-    const response = await fetch(imageUrl)
+    const response = await fetch(imageUrl, { 
+      // Increase timeout for large images
+      signal: AbortSignal.timeout(30000) 
+    })
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.statusText}`)
     }
@@ -43,7 +46,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
 }
 
 // Function to poll task status until completion
-async function pollTaskUntilComplete(zai: any, taskId: string, maxPolls: number = 60): Promise<any> {
+async function pollTaskUntilComplete(zai: any, taskId: string, maxPolls: number = 80): Promise<any> {
   let pollCount = 0
   const pollInterval = 5000 // 5 seconds
 
@@ -71,7 +74,9 @@ async function pollTaskUntilComplete(zai: any, taskId: string, maxPolls: number 
 
       // Still processing
       pollCount++
-      console.log(`Cron: Poll ${pollCount}/${maxPolls} for task ${taskId}: ${result.task_status}`)
+      if (pollCount % 10 === 0) { // Log every 10 polls
+        console.log(`Cron: Poll ${pollCount}/${maxPolls} for task ${taskId}: ${result.task_status}`)
+      }
 
       // Wait before next poll
       await new Promise(resolve => setTimeout(resolve, pollInterval))
@@ -105,14 +110,16 @@ export async function GET(request: NextRequest) {
 
   try {
     // Find queued jobs
+    console.log('Cron: Fetching queued jobs from database...')
     const queuedJobs = await db.videoJob.findMany({
       where: { status: 'queued' },
       orderBy: { createdAt: 'asc' },
-      take: 2 // Process up to 2 jobs per cron run to avoid timeouts
+      take: 1 // Process 1 job at a time to avoid timeouts
     })
 
+    console.log(`Cron: Found ${queuedJobs.length} queued job(s)`)
+
     if (queuedJobs.length === 0) {
-      console.log('Cron: No queued jobs found')
       return NextResponse.json({
         success: true,
         message: 'No queued jobs to process',
@@ -120,16 +127,23 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    console.log(`Cron: Found ${queuedJobs.length} queued job(s)`)
-
     // Initialize ZAI SDK
+    console.log('Cron: Initializing ZAI SDK...')
     const zai = await ZAI.create()
+    console.log('Cron: ZAI SDK initialized successfully')
 
     let processedCount = 0
     let failedCount = 0
 
     for (const job of queuedJobs) {
       console.log(`Cron: Processing job ${job.id}`)
+      console.log(`Cron: Job details:`, {
+        id: job.id,
+        prompt: job.prompt.substring(0, 50),
+        hasImageUrl: !!job.imageUrl,
+        quality: job.quality,
+        duration: job.duration
+      })
 
       try {
         // Update job status to processing
@@ -137,6 +151,7 @@ export async function GET(request: NextRequest) {
           where: { id: job.id },
           data: { status: 'processing', progress: 30 }
         })
+        console.log(`Cron: Job ${job.id} status updated to processing`)
 
         // Convert image URL to base64 for AI processing
         let base64Image: string | undefined
@@ -171,7 +186,9 @@ export async function GET(request: NextRequest) {
           hasImage: !!base64Image,
           prompt: job.prompt.substring(0, 50),
           quality: job.quality,
-          duration: job.duration
+          duration: job.duration,
+          fps: job.fps,
+          resolution: job.resolution
         })
 
         const task = await zai.video.generations.create(taskParams)
@@ -183,11 +200,13 @@ export async function GET(request: NextRequest) {
           where: { id: job.id },
           data: { taskId: task.id, progress: 50 }
         })
+        console.log(`Cron: Job ${job.id} updated with task ID ${task.id}`)
 
         // Poll for results
+        console.log(`Cron: Starting to poll for video generation results...`)
         const result = await pollTaskUntilComplete(zai, task.id, 80)
 
-        console.log(`Cron: Job ${job.id} completed successfully`)
+        console.log(`Cron: Job ${job.id} completed successfully, video URL: ${result.url}`)
 
         // Update job with success
         await db.videoJob.update({
@@ -199,12 +218,13 @@ export async function GET(request: NextRequest) {
             completedAt: new Date()
           }
         })
+        console.log(`Cron: Job ${job.id} marked as completed`)
 
         processedCount++
 
       } catch (error) {
         console.error(`Cron: Job ${job.id} failed:`, error)
-
+        
         // Update job with error
         await db.videoJob.update({
           where: { id: job.id },
@@ -213,6 +233,7 @@ export async function GET(request: NextRequest) {
             errorMessage: error instanceof Error ? error.message : 'Unknown error'
           }
         })
+        console.log(`Cron: Job ${job.id} marked as failed`)
 
         failedCount++
       }
