@@ -88,15 +88,28 @@ export default function ImageToVideoPage() {
   }
 
   const handleGenerateVideo = async () => {
+    console.log('Generate Video button clicked')
+
     if (!imageFile) {
+      console.error('No image file uploaded')
       alert('Please upload an image first')
       return
     }
 
     if (!prompt.trim()) {
+      console.error('No prompt entered')
       alert('Please enter a motion style prompt')
       return
     }
+
+    console.log('Starting video generation:', {
+      imageFile: imageFile.name,
+      prompt: prompt,
+      duration: duration[0],
+      fps: fps[0],
+      quality,
+      resolution
+    })
 
     try {
       setJob({
@@ -114,17 +127,23 @@ export default function ImageToVideoPage() {
       formData.append('quality', quality)
       formData.append('resolution', resolution)
 
+      console.log('Sending request to /api/video/create')
+
       const uploadResponse = await fetch('/api/video/create', {
         method: 'POST',
         body: formData,
       })
 
+      console.log('Response status:', uploadResponse.status)
+
       if (!uploadResponse.ok) {
         const error = await uploadResponse.json()
+        console.error('Upload failed:', error)
         throw new Error(error.message || 'Failed to upload image')
       }
 
       const { jobId } = await uploadResponse.json()
+      console.log('Job created:', jobId)
 
       setJob({
         id: jobId,
@@ -134,26 +153,34 @@ export default function ImageToVideoPage() {
       })
 
       // Start polling for job status
+      console.log('Starting job status polling')
       pollJobStatus(jobId)
     } catch (error) {
+      console.error('Video generation error:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start video generation'
+      alert(errorMessage)
       setJob({
         id: '',
         status: 'failed',
         progress: 0,
-        error: error instanceof Error ? error.message : 'Failed to start video generation'
+        error: errorMessage
       })
     }
   }
 
   const pollJobStatus = async (jobId: string) => {
+    console.log('Polling job status for:', jobId)
     const pollInterval = setInterval(async () => {
       try {
         const response = await fetch(`/api/video/status/${jobId}`)
+        console.log('Status check response:', response.status)
+
         if (!response.ok) {
           throw new Error('Failed to check job status')
         }
 
         const data = await response.json()
+        console.log('Job status data:', data)
 
         if (data.status === 'processing') {
           setJob(prev => prev ? {
@@ -162,6 +189,7 @@ export default function ImageToVideoPage() {
             progress: Math.min(data.progress || 50, 90)
           } : null)
         } else if (data.status === 'completed') {
+          console.log('Job completed successfully:', data.videoUrl)
           clearInterval(pollInterval)
           setJob(prev => prev ? {
             ...prev,
@@ -170,6 +198,7 @@ export default function ImageToVideoPage() {
             videoUrl: data.videoUrl
           } : null)
         } else if (data.status === 'failed') {
+          console.error('Job failed:', data.error)
           clearInterval(pollInterval)
           setJob(prev => prev ? {
             ...prev,
@@ -178,6 +207,7 @@ export default function ImageToVideoPage() {
           } : null)
         }
       } catch (error) {
+        console.error('Polling error:', error)
         clearInterval(pollInterval)
         setJob(prev => prev ? {
           ...prev,
@@ -458,7 +488,7 @@ export default function ImageToVideoPage() {
         <div className="flex gap-3 pt-4">
           <Button
             onClick={handleGenerateVideo}
-            disabled={!imageFile || !prompt.trim() || (job?.status !== 'idle' && job?.status !== 'completed' && job?.status !== 'failed')}
+            disabled={!imageFile || !prompt.trim() || (job && job.status !== 'completed' && job.status !== 'failed')}
             className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white font-semibold h-11"
           >
             {job?.status === 'uploading' || job?.status === 'queued' || job?.status === 'processing' ? (

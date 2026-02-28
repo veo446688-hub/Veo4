@@ -10,15 +10,20 @@ const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', '
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
 export async function POST(request: NextRequest) {
+  console.log('API: /api/video/create called')
+
   try {
     // Rate limiting based on IP address
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0] ||
                request.headers.get('x-real-ip') ||
                'unknown'
 
+    console.log('API: Request from IP:', ip)
+
     const rateLimitResult = rateLimit(ip, 5, 60000) // 5 requests per minute
 
     if (!rateLimitResult.allowed) {
+      console.log('API: Rate limit exceeded for IP:', ip)
       return NextResponse.json(
         {
           success: false,
@@ -36,6 +41,17 @@ export async function POST(request: NextRequest) {
     const fps = parseInt(formData.get('fps') as string)
     const quality = formData.get('quality') as string
     const resolution = formData.get('resolution') as string
+
+    console.log('API: Received request:', {
+      hasImage: !!image,
+      imageType: image?.type,
+      imageSize: image?.size,
+      prompt: prompt?.substring(0, 50),
+      duration,
+      fps,
+      quality,
+      resolution
+    })
 
     // Validate required fields
     if (!image) {
@@ -109,6 +125,7 @@ export async function POST(request: NextRequest) {
     await writeFile(filepath, buffer)
 
     // Create job record in database
+    console.log('API: Creating job in database')
     const job = await db.videoJob.create({
       data: {
         status: 'queued',
@@ -121,6 +138,7 @@ export async function POST(request: NextRequest) {
         imageUrl: `/uploads/images/${filename}`,
       }
     })
+    console.log('API: Job created:', job.id)
 
     // Notify the background processing service (via a simple trigger file)
     const triggerDir = path.join(process.cwd(), 'queue', 'triggers')
@@ -137,6 +155,7 @@ export async function POST(request: NextRequest) {
       quality,
       resolution
     }))
+    console.log('API: Trigger file created:', triggerFile)
 
     return NextResponse.json({
       success: true,
