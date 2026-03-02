@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Upload, Video, Download, Loader2, CheckCircle, XCircle, Play, RefreshCw, FileImage, Sparkles, Clock, Zap } from 'lucide-react'
+import { Upload, Video, Download, Loader2, CheckCircle, XCircle, Play, RefreshCw, FileImage, Sparkles, Clock, Zap, Code, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
@@ -13,6 +13,7 @@ import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { useToast } from '@/hooks/use-toast'
 
 type JobStatus = 'idle' | 'uploading' | 'queued' | 'processing' | 'completed' | 'failed'
 
@@ -35,7 +36,10 @@ export default function ImageToVideoPage() {
   const [resolution, setResolution] = useState('1024x1024')
   const [job, setJob] = useState<VideoJob | null>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [jsonError, setJsonError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const { toast } = useToast()
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -99,7 +103,20 @@ export default function ImageToVideoPage() {
 
     if (!prompt.trim()) {
       console.error('No prompt entered')
-      alert('Please enter a motion style prompt')
+      alert('Please enter a JSON prompt')
+      return
+    }
+
+    // Validate JSON format
+    try {
+      const parsedPrompt = JSON.parse(prompt)
+      if (!parsedPrompt.prompt && !parsedPrompt.description) {
+        throw new Error('JSON must contain either "prompt" or "description" field')
+      }
+      setJsonError(null)
+    } catch (e) {
+      setJsonError('Invalid JSON format: ' + (e instanceof Error ? e.message : 'Unknown error'))
+      alert('Please enter valid JSON. Click "Show Example" to see the correct format.')
       return
     }
 
@@ -302,16 +319,98 @@ export default function ImageToVideoPage() {
     }
   }
 
-  const motionStyles = [
-    { label: 'Cinematic Pan', prompt: 'Smooth cinematic pan movement across the scene' },
-    { label: 'Subtle Breathing', prompt: 'Gentle breathing motion, subtle and organic movement' },
-    { label: 'Dramatic Storm', prompt: 'Dynamic storm movement with dramatic energy' },
-    { label: 'Floating Effect', prompt: 'Dreamy floating sensation, weightless and ethereal' },
-    { label: 'Zoom In', prompt: 'Slow and steady zoom into the main subject' },
-    { label: 'Parallax Motion', prompt: 'Parallax depth effect with layered movement' },
-    { label: 'Wind Motion', prompt: 'Natural wind effect, elements gently swaying' },
-    { label: 'Time Lapse', prompt: 'Time lapse effect, accelerated movement' },
+  const exampleJsonPrompts = [
+    {
+      label: 'Cinematic Pan',
+      json: {
+        "prompt": "Smooth cinematic pan movement across the scene",
+        "motion_style": "cinematic",
+        "camera_movement": "pan_left_to_right",
+        "speed": "slow",
+        "atmosphere": "dramatic and professional",
+        "camera_settings": {
+          "stabilization": true,
+          "smooth_transition": true
+        }
+      }
+    },
+    {
+      label: 'Subtle Breathing',
+      json: {
+        "prompt": "Gentle breathing motion, subtle and organic movement",
+        "motion_style": "subtle",
+        "camera_movement": "slight_zoom_breath",
+        "speed": "very_slow",
+        "atmosphere": "calm and peaceful",
+        "camera_settings": {
+          "stabilization": true,
+          "smooth_transition": true
+        }
+      }
+    },
+    {
+      label: 'Dramatic Storm',
+      json: {
+        "prompt": "Dynamic storm movement with dramatic energy",
+        "motion_style": "dramatic",
+        "camera_movement": "dynamic_shake",
+        "speed": "fast",
+        "atmosphere": "intense and powerful",
+        "camera_settings": {
+          "stabilization": false,
+          "dynamic_movement": true
+        }
+      }
+    },
+    {
+      label: 'Floating Effect',
+      json: {
+        "prompt": "Dreamy floating sensation, weightless and ethereal",
+        "motion_style": "dreamy",
+        "camera_movement": "gentle_float",
+        "speed": "slow",
+        "atmosphere": "ethereal and magical",
+        "camera_settings": {
+          "stabilization": true,
+          "smooth_transition": true
+        }
+      }
+    }
   ]
+
+  const handleLoadExample = (example: any) => {
+    const formattedJson = JSON.stringify(example.json, null, 2)
+    setPrompt(formattedJson)
+    setJsonError(null)
+  }
+
+  const handleCopyExample = (example: any) => {
+    const formattedJson = JSON.stringify(example.json, null, 2)
+    navigator.clipboard.writeText(formattedJson)
+    setCopied(true)
+    toast({
+      title: 'Copied!',
+      description: 'JSON prompt copied to clipboard',
+    })
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const validateJson = (jsonString: string) => {
+    try {
+      if (!jsonString.trim()) {
+        setJsonError(null)
+        return
+      }
+      const parsed = JSON.parse(jsonString)
+      if (!parsed.prompt && !parsed.description) {
+        setJsonError('JSON must contain either "prompt" or "description" field')
+      } else {
+        setJsonError(null)
+      }
+    } catch (e) {
+      setJsonError('Invalid JSON format')
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
@@ -406,45 +505,88 @@ export default function ImageToVideoPage() {
           )}
         </div>
 
-        {/* Motion Style Prompt */}
+        {/* JSON Prompt Section */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <Label htmlFor="prompt" className="text-base font-semibold flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-fuchsia-600" />
-              Motion Style Prompt
+              <Code className="w-4 h-4 text-fuchsia-600" />
+              JSON Prompt
             </Label>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
-                const randomStyle = motionStyles[Math.floor(Math.random() * motionStyles.length)]
-                setPrompt(randomStyle.prompt)
+                const randomExample = exampleJsonPrompts[Math.floor(Math.random() * exampleJsonPrompts.length)]
+                handleLoadExample(randomExample)
               }}
               className="h-7 text-xs"
             >
               <RefreshCw className="w-3 h-3 mr-1" />
-              Random
+              Random Example
             </Button>
           </div>
-          <Textarea
-            id="prompt"
-            placeholder="Describe the motion style (e.g., 'Cinematic pan across the scene', 'Gentle breathing motion')"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={3}
-            className="resize-none border-slate-300 dark:border-slate-700 focus:border-violet-500"
-          />
-          <div className="flex flex-wrap gap-2">
-            {motionStyles.slice(0, 4).map((style) => (
-              <Badge
-                key={style.label}
-                variant={prompt === style.prompt ? "default" : "outline"}
-                className="cursor-pointer hover:bg-violet-100 dark:hover:bg-violet-900/30"
-                onClick={() => setPrompt(style.prompt)}
-              >
-                {style.label}
-              </Badge>
-            ))}
+          <div className="relative">
+            <Textarea
+              id="prompt"
+              placeholder='{
+  "prompt": "Describe the motion",
+  "motion_style": "cinematic",
+  "camera_movement": "pan_left_to_right",
+  "speed": "slow",
+  "atmosphere": "dramatic"
+}'
+              value={prompt}
+              onChange={(e) => {
+                setPrompt(e.target.value)
+                validateJson(e.target.value)
+              }}
+              rows={8}
+              className={`resize-none font-mono text-sm border-slate-300 dark:border-slate-700 focus:border-violet-500 ${jsonError ? 'border-red-500' : ''}`}
+            />
+          </div>
+          {jsonError && (
+            <Alert className="bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900">
+              <XCircle className="w-4 h-4 text-red-600" />
+              <AlertDescription className="text-red-800 dark:text-red-300 text-sm">
+                {jsonError}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Example Prompts */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-slate-600 dark:text-slate-400">
+              Quick Examples (click to load):
+            </Label>
+            <div className="grid grid-cols-2 gap-2">
+              {exampleJsonPrompts.map((example) => (
+                <div
+                  key={example.label}
+                  className="group relative p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-violet-400 dark:hover:border-violet-600 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50"
+                  onClick={() => handleLoadExample(example)}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      {example.label}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleCopyExample(example)
+                      }}
+                    >
+                      <Copy className="w-3 h-3" />
+                    </Button>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-500 truncate">
+                    {example.json.camera_movement}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

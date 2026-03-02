@@ -50,11 +50,62 @@ export async function POST(request: NextRequest) {
     const quality = formData.get('quality') as string
     const resolution = formData.get('resolution') as string
 
+    // Parse JSON prompt and extract main description
+    let parsedPrompt: any = null
+    let finalPrompt = prompt
+
+    try {
+      if (prompt.trim()) {
+        parsedPrompt = JSON.parse(prompt)
+        console.log('API: Parsed JSON prompt:', JSON.stringify(parsedPrompt, null, 2))
+
+        // Extract the main prompt from JSON
+        finalPrompt = parsedPrompt.prompt || parsedPrompt.description || prompt
+
+        // Log additional parameters from JSON if present
+        if (parsedPrompt.motion_style) {
+          console.log(`API: Motion style: ${parsedPrompt.motion_style}`)
+        }
+        if (parsedPrompt.camera_movement) {
+          console.log(`API: Camera movement: ${parsedPrompt.camera_movement}`)
+        }
+        if (parsedPrompt.speed) {
+          console.log(`API: Speed: ${parsedPrompt.speed}`)
+        }
+        if (parsedPrompt.atmosphere) {
+          console.log(`API: Atmosphere: ${parsedPrompt.atmosphere}`)
+        }
+
+        // Enrich the final prompt with JSON parameters
+        const promptParts = [finalPrompt]
+        if (parsedPrompt.motion_style) {
+          promptParts.push(`with ${parsedPrompt.motion_style} motion style`)
+        }
+        if (parsedPrompt.camera_movement) {
+          promptParts.push(`using ${parsedPrompt.camera_movement} camera movement`)
+        }
+        if (parsedPrompt.speed) {
+          promptParts.push(`at ${parsedPrompt.speed} speed`)
+        }
+        if (parsedPrompt.atmosphere) {
+          promptParts.push(`in a ${parsedPrompt.atmosphere} atmosphere`)
+        }
+
+        finalPrompt = promptParts.join(', ')
+        console.log('API: Final enriched prompt:', finalPrompt)
+      }
+    } catch (e) {
+      // If not valid JSON, use as plain text prompt
+      console.log('API: Prompt is not valid JSON, using as plain text')
+      finalPrompt = prompt
+    }
+
     console.log('API: Received request:', {
       hasImage: !!image,
       imageType: image?.type,
       imageSize: image?.size,
-      prompt: prompt?.substring(0, 50),
+      originalPrompt: prompt?.substring(0, 50),
+      finalPrompt: finalPrompt?.substring(0, 50),
       duration,
       fps,
       quality,
@@ -71,7 +122,7 @@ export async function POST(request: NextRequest) {
 
     if (!prompt || !prompt.trim()) {
       return NextResponse.json(
-        { success: false, message: 'Prompt is required' },
+        { success: false, message: 'JSON prompt is required' },
         { status: 400 }
       )
     }
@@ -144,7 +195,7 @@ export async function POST(request: NextRequest) {
       data: {
         status: 'queued',
         progress: 0,
-        prompt: prompt.trim(),
+        prompt: finalPrompt, // Store the enriched prompt
         duration,
         fps,
         quality,
