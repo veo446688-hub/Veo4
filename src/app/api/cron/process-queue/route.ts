@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import ZAI from 'z-ai-web-dev-sdk'
+import { getZAIClient } from '@/lib/zai-client'
 
 // Configure for Vercel Cron Jobs
 export const dynamic = 'force-dynamic'
@@ -127,15 +127,33 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Initialize ZAI SDK
+    // Initialize ZAI SDK using the utility function
     console.log('Initializing ZAI SDK...')
     let zai: any
     try {
-      zai = await ZAI.create()
+      zai = await getZAIClient()
       console.log('ZAI SDK initialized successfully')
     } catch (sdkError) {
       console.error('Failed to initialize ZAI SDK:', sdkError)
-      throw new Error(`ZAI SDK initialization failed: ${sdkError instanceof Error ? sdkError.message : 'Unknown error'}`)
+
+      // Update all queued jobs with configuration error
+      for (const job of queuedJobs) {
+        await db.videoJob.update({
+          where: { id: job.id },
+          data: {
+            status: 'failed',
+            errorMessage: sdkError instanceof Error ? sdkError.message : 'ZAI SDK initialization failed'
+          }
+        })
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: sdkError instanceof Error ? sdkError.message : 'ZAI SDK initialization failed'
+        },
+        { status: 500 }
+      )
     }
 
     let processedCount = 0

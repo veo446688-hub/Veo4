@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import ZAI from 'z-ai-web-dev-sdk'
+import { getZAIClient } from '@/lib/zai-client'
 
 // Configure for manual testing
 export const dynamic = 'force-dynamic'
@@ -134,14 +134,24 @@ export async function POST(request: NextRequest) {
     })
     console.log(`[TEST] Job ${job.id} updated to processing (30%)`)
 
-    // Initialize ZAI SDK
+    // Initialize ZAI SDK using the utility function
     console.log('[TEST] Initializing ZAI SDK...')
     let zai: any
     try {
-      zai = await ZAI.create()
+      zai = await getZAIClient()
       console.log('[TEST] ZAI SDK initialized successfully')
     } catch (sdkError) {
       console.error('[TEST] Failed to initialize ZAI SDK:', sdkError)
+
+      // Update job with error
+      await db.videoJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'failed',
+          errorMessage: sdkError instanceof Error ? sdkError.message : 'ZAI SDK initialization failed'
+        }
+      })
+
       throw new Error(`ZAI SDK initialization failed: ${sdkError instanceof Error ? sdkError.message : 'Unknown error'}`)
     }
 
