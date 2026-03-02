@@ -108,6 +108,24 @@ export async function GET(request: NextRequest) {
   console.log('='.repeat(60))
 
   try {
+    // Check if ZAI environment variables are configured
+    const baseUrl = process.env.ZAI_BASE_URL || process.env.NEXT_PUBLIC_ZAI_BASE_URL
+    const apiKey = process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY
+
+    if (!baseUrl || !apiKey) {
+      console.log('[CRON] ⚠️  ZAI environment variables not configured')
+      console.log('[CRON] - ZAI_BASE_URL:', baseUrl ? '✓' : '✗')
+      console.log('[CRON] - ZAI_API_KEY:', apiKey ? '✓' : '✗')
+      console.log('[CRON] Skipping job processing until variables are set')
+
+      return NextResponse.json({
+        success: true,
+        message: 'ZAI not configured, skipping job processing',
+        processed: 0,
+        configured: false
+      })
+    }
+
     // Find queued jobs
     console.log('Fetching queued jobs from database...')
     const queuedJobs = await db.videoJob.findMany({
@@ -123,7 +141,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: 'No queued jobs to process',
-        processed: 0
+        processed: 0,
+        configured: true
       })
     }
 
@@ -281,7 +300,8 @@ export async function GET(request: NextRequest) {
       message: `Processed ${processedCount} jobs successfully, ${failedCount} failed`,
       processed: processedCount,
       failed: failedCount,
-      total: queuedJobs.length
+      total: queuedJobs.length,
+      configured: true
     })
 
   } catch (error) {

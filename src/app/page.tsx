@@ -205,6 +205,28 @@ export default function ImageToVideoPage() {
         imageUrl: imagePreview
       })
 
+      // Trigger immediate video processing
+      console.log('Triggering immediate video processing...')
+      try {
+        const processResponse = await fetch('/api/video/process-now', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ jobId }),
+        })
+
+        if (processResponse.ok) {
+          console.log('Video processing triggered successfully')
+        } else {
+          const errorText = await processResponse.text()
+          console.warn('Failed to trigger processing (will retry via cron):', errorText)
+        }
+      } catch (processError) {
+        console.warn('Failed to trigger immediate processing (will retry via cron):', processError)
+        // Continue with polling - cron job will pick it up
+      }
+
       // Start polling for job status
       console.log('Starting job status polling')
       pollJobStatus(jobId)
